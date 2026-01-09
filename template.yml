@@ -1,0 +1,435 @@
+trigger: none
+
+parameters:
+- name: operation
+  displayName: 'Select Operation'
+  type: string
+  default: 'stop'
+  values:
+  - stop
+  - start
+
+# Multiple schedules for stop and start operations
+schedules:
+- cron: "0 5 * * 5"
+  displayName: Stop Dev Clusters (5 AM UTC Friday)
+  branches:
+    include:
+    - main
+  always: true
+
+- cron: "0 2 * * 0"
+  displayName: Start Dev Clusters (2 AM UTC Sunday)
+  branches:
+    include:
+    - main
+  always: true
+
+pool:
+  vmImage: 'ubuntu-latest'
+
+variables:
+- group: 'nonprod-infrastructure'
+
+# Define clusters for each service connection
+- name: serviceConnection1_clusters
+  value: |
+    [
+      {"name": "ClusterDev01", "resourceGroup": "rg-development-01"},
+      {"name": "ClusterDev02", "resourceGroup": "rg-development-02"}
+    ]
+
+- name: serviceConnection2_clusters
+  value: |
+    [
+      {"name": "ClusterDev03", "resourceGroup": "rg-development-03"},
+      {"name": "ClusterDev04", "resourceGroup": "rg-development-04"}
+    ]
+
+# Service connection names
+- name: serviceConnection1
+  value: 'service-connection-1'
+
+- name: serviceConnection2
+  value: 'service-connection-2'
+
+stages:
+- stage: StopClusters
+  displayName: 'Stop AKS Development Clusters'
+  condition: |
+    or(
+      eq('${{ parameters.operation }}', 'stop'),
+      and(
+        eq(variables['Build.Reason'], 'Schedule'),
+        eq(variables['Build.CronSchedule.DisplayName'], 'Stop Dev Clusters (5 AM UTC Friday)')
+      )
+    )
+  jobs:
+  
+  - job: StopServiceConnection1
+    displayName: 'Stop Clusters - Service Connection 1'
+    steps:
+    
+    - task: AzureCLI@2
+      displayName: 'Stop AKS Clusters (Connection 1)'
+      inputs:
+        azureSubscription: $(serviceConnection1)
+        scriptType: 'bash'
+        scriptLocation: 'inlineScript'
+        inlineScript: |
+          echo "Starting cluster stop operations for Service Connection 1..."
+          echo ""
+          
+          # Parse the JSON array of clusters
+          clusters='$(serviceConnection1_clusters)'
+          
+          # Loop through each cluster
+          echo "$clusters" | jq -c '.[]' | while read cluster; do
+            clusterName=$(echo $cluster | jq -r '.name')
+            resourceGroup=$(echo $cluster | jq -r '.resourceGroup')
+            
+            echo "================================================"
+            echo "Processing cluster: $clusterName"
+            echo "Resource Group: $resourceGroup"
+            echo "================================================"
+            
+            # Check current cluster state
+            state=$(az aks show \
+              --name $clusterName \
+              --resource-group $resourceGroup \
+              --query 'powerState.code' \
+              --output tsv 2>/dev/null)
+            
+            if [ $? -ne 0 ]; then
+              echo "ERROR: Failed to get status for cluster $clusterName"
+              continue
+            fi
+            
+            echo "Current state: $state"
+            
+            if [ "$state" = "Stopped" ]; then
+              echo "Cluster $clusterName is already stopped. Skipping..."
+            else
+              echo "Stopping cluster $clusterName..."
+              az aks stop \
+                --name $clusterName \
+                --resource-group $resourceGroup
+              
+              if [ $? -eq 0 ]; then
+                echo "✓ Successfully initiated stop for $clusterName"
+              else
+                echo "✗ Failed to stop $clusterName"
+                exit 1
+              fi
+            fi
+            
+            echo ""
+          done
+          
+          echo "================================================"
+          echo "Service Connection 1 - Stop operations completed"
+          echo "================================================"
+    
+    - task: AzureCLI@2
+      displayName: 'Verify Cluster States (Connection 1)'
+      inputs:
+        azureSubscription: $(serviceConnection1)
+        scriptType: 'bash'
+        scriptLocation: 'inlineScript'
+        inlineScript: |
+          echo "Verifying cluster states for Service Connection 1..."
+          echo ""
+          
+          clusters='$(serviceConnection1_clusters)'
+          
+          echo "$clusters" | jq -c '.[]' | while read cluster; do
+            clusterName=$(echo $cluster | jq -r '.name')
+            resourceGroup=$(echo $cluster | jq -r '.resourceGroup')
+            
+            state=$(az aks show \
+              --name $clusterName \
+              --resource-group $resourceGroup \
+              --query 'powerState.code' \
+              --output tsv)
+            
+            echo "Cluster: $clusterName | State: $state"
+          done
+
+  - job: StopServiceConnection2
+    displayName: 'Stop Clusters - Service Connection 2'
+    steps:
+    
+    - task: AzureCLI@2
+      displayName: 'Stop AKS Clusters (Connection 2)'
+      inputs:
+        azureSubscription: $(serviceConnection2)
+        scriptType: 'bash'
+        scriptLocation: 'inlineScript'
+        inlineScript: |
+          echo "Starting cluster stop operations for Service Connection 2..."
+          echo ""
+          
+          # Parse the JSON array of clusters
+          clusters='$(serviceConnection2_clusters)'
+          
+          # Loop through each cluster
+          echo "$clusters" | jq -c '.[]' | while read cluster; do
+            clusterName=$(echo $cluster | jq -r '.name')
+            resourceGroup=$(echo $cluster | jq -r '.resourceGroup')
+            
+            echo "================================================"
+            echo "Processing cluster: $clusterName"
+            echo "Resource Group: $resourceGroup"
+            echo "================================================"
+            
+            # Check current cluster state
+            state=$(az aks show \
+              --name $clusterName \
+              --resource-group $resourceGroup \
+              --query 'powerState.code' \
+              --output tsv 2>/dev/null)
+            
+            if [ $? -ne 0 ]; then
+              echo "ERROR: Failed to get status for cluster $clusterName"
+              continue
+            fi
+            
+            echo "Current state: $state"
+            
+            if [ "$state" = "Stopped" ]; then
+              echo "Cluster $clusterName is already stopped. Skipping..."
+            else
+              echo "Stopping cluster $clusterName..."
+              az aks stop \
+                --name $clusterName \
+                --resource-group $resourceGroup
+              
+              if [ $? -eq 0 ]; then
+                echo "✓ Successfully initiated stop for $clusterName"
+              else
+                echo "✗ Failed to stop $clusterName"
+                exit 1
+              fi
+            fi
+            
+            echo ""
+          done
+          
+          echo "================================================"
+          echo "Service Connection 2 - Stop operations completed"
+          echo "================================================"
+    
+    - task: AzureCLI@2
+      displayName: 'Verify Cluster States (Connection 2)'
+      inputs:
+        azureSubscription: $(serviceConnection2)
+        scriptType: 'bash'
+        scriptLocation: 'inlineScript'
+        inlineScript: |
+          echo "Verifying cluster states for Service Connection 2..."
+          echo ""
+          
+          clusters='$(serviceConnection2_clusters)'
+          
+          echo "$clusters" | jq -c '.[]' | while read cluster; do
+            clusterName=$(echo $cluster | jq -r '.name')
+            resourceGroup=$(echo $cluster | jq -r '.resourceGroup')
+            
+            state=$(az aks show \
+              --name $clusterName \
+              --resource-group $resourceGroup \
+              --query 'powerState.code' \
+              --output tsv)
+            
+            echo "Cluster: $clusterName | State: $state"
+          done
+
+- stage: StartClusters
+  displayName: 'Start AKS Development Clusters'
+  condition: |
+    or(
+      eq('${{ parameters.operation }}', 'start'),
+      and(
+        eq(variables['Build.Reason'], 'Schedule'),
+        eq(variables['Build.CronSchedule.DisplayName'], 'Start Dev Clusters (2 AM UTC Sunday)')
+      )
+    )
+  jobs:
+  
+  - job: StartServiceConnection1
+    displayName: 'Start Clusters - Service Connection 1'
+    steps:
+    
+    - task: AzureCLI@2
+      displayName: 'Start AKS Clusters (Connection 1)'
+      inputs:
+        azureSubscription: $(serviceConnection1)
+        scriptType: 'bash'
+        scriptLocation: 'inlineScript'
+        inlineScript: |
+          echo "Starting cluster start operations for Service Connection 1..."
+          echo ""
+          
+          # Parse the JSON array of clusters
+          clusters='$(serviceConnection1_clusters)'
+          
+          # Loop through each cluster
+          echo "$clusters" | jq -c '.[]' | while read cluster; do
+            clusterName=$(echo $cluster | jq -r '.name')
+            resourceGroup=$(echo $cluster | jq -r '.resourceGroup')
+            
+            echo "================================================"
+            echo "Processing cluster: $clusterName"
+            echo "Resource Group: $resourceGroup"
+            echo "================================================"
+            
+            # Check current cluster state
+            state=$(az aks show \
+              --name $clusterName \
+              --resource-group $resourceGroup \
+              --query 'powerState.code' \
+              --output tsv 2>/dev/null)
+            
+            if [ $? -ne 0 ]; then
+              echo "ERROR: Failed to get status for cluster $clusterName"
+              continue
+            fi
+            
+            echo "Current state: $state"
+            
+            if [ "$state" = "Running" ]; then
+              echo "Cluster $clusterName is already running. Skipping..."
+            else
+              echo "Starting cluster $clusterName..."
+              az aks start \
+                --name $clusterName \
+                --resource-group $resourceGroup
+              
+              if [ $? -eq 0 ]; then
+                echo "✓ Successfully initiated start for $clusterName"
+              else
+                echo "✗ Failed to start $clusterName"
+                exit 1
+              fi
+            fi
+            
+            echo ""
+          done
+          
+          echo "================================================"
+          echo "Service Connection 1 - Start operations completed"
+          echo "================================================"
+    
+    - task: AzureCLI@2
+      displayName: 'Verify Cluster States (Connection 1)'
+      inputs:
+        azureSubscription: $(serviceConnection1)
+        scriptType: 'bash'
+        scriptLocation: 'inlineScript'
+        inlineScript: |
+          echo "Verifying cluster states for Service Connection 1..."
+          echo ""
+          
+          clusters='$(serviceConnection1_clusters)'
+          
+          echo "$clusters" | jq -c '.[]' | while read cluster; do
+            clusterName=$(echo $cluster | jq -r '.name')
+            resourceGroup=$(echo $cluster | jq -r '.resourceGroup')
+            
+            state=$(az aks show \
+              --name $clusterName \
+              --resource-group $resourceGroup \
+              --query 'powerState.code' \
+              --output tsv)
+            
+            echo "Cluster: $clusterName | State: $state"
+          done
+
+  - job: StartServiceConnection2
+    displayName: 'Start Clusters - Service Connection 2'
+    steps:
+    
+    - task: AzureCLI@2
+      displayName: 'Start AKS Clusters (Connection 2)'
+      inputs:
+        azureSubscription: $(serviceConnection2)
+        scriptType: 'bash'
+        scriptLocation: 'inlineScript'
+        inlineScript: |
+          echo "Starting cluster start operations for Service Connection 2..."
+          echo ""
+          
+          # Parse the JSON array of clusters
+          clusters='$(serviceConnection2_clusters)'
+          
+          # Loop through each cluster
+          echo "$clusters" | jq -c '.[]' | while read cluster; do
+            clusterName=$(echo $cluster | jq -r '.name')
+            resourceGroup=$(echo $cluster | jq -r '.resourceGroup')
+            
+            echo "================================================"
+            echo "Processing cluster: $clusterName"
+            echo "Resource Group: $resourceGroup"
+            echo "================================================"
+            
+            # Check current cluster state
+            state=$(az aks show \
+              --name $clusterName \
+              --resource-group $resourceGroup \
+              --query 'powerState.code' \
+              --output tsv 2>/dev/null)
+            
+            if [ $? -ne 0 ]; then
+              echo "ERROR: Failed to get status for cluster $clusterName"
+              continue
+            fi
+            
+            echo "Current state: $state"
+            
+            if [ "$state" = "Running" ]; then
+              echo "Cluster $clusterName is already running. Skipping..."
+            else
+              echo "Starting cluster $clusterName..."
+              az aks start \
+                --name $clusterName \
+                --resource-group $resourceGroup
+              
+              if [ $? -eq 0 ]; then
+                echo "✓ Successfully initiated start for $clusterName"
+              else
+                echo "✗ Failed to start $clusterName"
+                exit 1
+              fi
+            fi
+            
+            echo ""
+          done
+          
+          echo "================================================"
+          echo "Service Connection 2 - Start operations completed"
+          echo "================================================"
+    
+    - task: AzureCLI@2
+      displayName: 'Verify Cluster States (Connection 2)'
+      inputs:
+        azureSubscription: $(serviceConnection2)
+        scriptType: 'bash'
+        scriptLocation: 'inlineScript'
+        inlineScript: |
+          echo "Verifying cluster states for Service Connection 2..."
+          echo ""
+          
+          clusters='$(serviceConnection2_clusters)'
+          
+          echo "$clusters" | jq -c '.[]' | while read cluster; do
+            clusterName=$(echo $cluster | jq -r '.name')
+            resourceGroup=$(echo $cluster | jq -r '.resourceGroup')
+            
+            state=$(az aks show \
+              --name $clusterName \
+              --resource-group $resourceGroup \
+              --query 'powerState.code' \
+              --output tsv)
+            
+            echo "Cluster: $clusterName | State: $state"
+          done
