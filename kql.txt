@@ -1,0 +1,22 @@
+// Key Vault Saturation Troubleshooting Query
+AzureDiagnostics
+| where ResourceProvider == "MICROSOFT.KEYVAULT"
+| where TimeGenerated > ago(24h)
+| extend 
+    VaultName = Resource,
+    OperationType = OperationName,
+    StatusCode = ResultSignature,
+    CallerIP = CallerIPAddress,
+    Duration = DurationMs
+| summarize 
+    TotalRequests = count(),
+    FailedRequests = countif(ResultType == "Error" or httpStatusCode_d >= 400),
+    AvgDuration = avg(Duration),
+    MaxDuration = max(Duration),
+    UniqueCallers = dcount(CallerIP),
+    ThrottledRequests = countif(httpStatusCode_d == 429)
+    by VaultName, bin(TimeGenerated, 5m)
+| extend SaturationIndicator = iff(ThrottledRequests > 0 or FailedRequests > TotalRequests * 0.1, "High", "Normal")
+| project TimeGenerated, VaultName, TotalRequests, FailedRequests, ThrottledRequests, 
+          UniqueCallers, AvgDuration, MaxDuration, SaturationIndicator
+| order by TimeGenerated desc
